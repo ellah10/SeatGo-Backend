@@ -8,9 +8,28 @@ import bookingRoutes from "./routes/booking.routes.js";
 
 const app = express();
 
-const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";
+// 🔥 Liste des origines autorisées
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://seat-go.vercel.app"
+];
 
-app.use(cors({ origin: corsOrigin, credentials: true }));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Autorise Postman / requêtes sans origin
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
 // Route test
