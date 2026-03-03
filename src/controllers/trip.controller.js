@@ -6,12 +6,23 @@ export async function listTrips(req, res, next) {
     const { departure, destination, date } = req.query;
 
     const filter = {};
-    if (departure) filter.departure = departure;
-    if (destination) filter.destination = destination;
-    if (date) filter.date = date;
+
+    // ✅ Recherche partielle + insensible à la casse
+    if (departure) {
+      filter.departure = { $regex: departure.trim(), $options: "i" };
+    }
+
+    if (destination) {
+      filter.destination = { $regex: destination.trim(), $options: "i" };
+    }
+
+    // ✅ Date exact (format "YYYY-MM-DD" comme dans ta DB)
+    if (date) {
+      filter.date = date;
+    }
 
     const trips = await Trip.find(filter).sort({ date: 1, departureTime: 1 });
-    res.json({ trips });
+    return res.json({ trips });
   } catch (err) {
     next(err);
   }
@@ -21,7 +32,7 @@ export async function getTrip(req, res, next) {
   try {
     const trip = await Trip.findById(req.params.id);
     if (!trip) return res.status(404).json({ message: "Trajet introuvable" });
-    res.json({ trip });
+    return res.json({ trip });
   } catch (err) {
     next(err);
   }
@@ -41,7 +52,7 @@ export async function getTripSeats(req, res, next) {
 
     const takenSeats = bookings.map((b) => b.seatNumber);
 
-    res.json({
+    return res.json({
       tripId,
       capacity: trip.capacity,
       takenSeats,
