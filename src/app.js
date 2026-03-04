@@ -5,6 +5,7 @@ import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import tripRoutes from "./routes/trip.routes.js";
 import bookingRoutes from "./routes/booking.routes.js";
+import dashboardRoutes from "./routes/dashboard.routes.js";
 
 const app = express();
 
@@ -41,5 +42,6 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/trips", tripRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 export default app;
