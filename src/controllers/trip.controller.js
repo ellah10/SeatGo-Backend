@@ -7,6 +7,10 @@ export async function listTrips(req, res, next) {
 
     const filter = {};
 
+    // Par défaut, on ne sert que les départs actifs côté étudiant/public.
+    // On garde la compatibilité avec les anciens documents qui n'ont pas de champ `status`.
+    filter.$or = [{ status: { $exists: false } }, { status: "ACTIVE" }];
+
     // ✅ Recherche partielle + insensible à la casse
     if (departure) {
       filter.departure = { $regex: departure.trim(), $options: "i" };
