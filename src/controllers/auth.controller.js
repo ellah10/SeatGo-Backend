@@ -78,6 +78,7 @@ export async function verifyOtp(req, res, next) {
           phone: user.phone,
           role: user.role,
           studentCardNumber: user.studentCardNumber,
+          avatarUrl: user.avatarUrl || "",
           isVerified: true,
         },
       });
@@ -119,6 +120,7 @@ export async function verifyOtp(req, res, next) {
         phone: user.phone,
         role: user.role,
         studentCardNumber: user.studentCardNumber,
+        avatarUrl: user.avatarUrl || "",
         isVerified: true,
       },
     });
@@ -195,6 +197,7 @@ export async function login(req, res, next) {
         phone: user.phone,
         role: user.role,
         studentCardNumber: user.studentCardNumber,
+        avatarUrl: user.avatarUrl || "",
         isVerified: user.isVerified,
       },
     });
