@@ -44,12 +44,23 @@ export async function register(req, res, next) {
       consumedAt: null,
     });
 
-    await sendOtpEmail({ to: user.email, code });
+    let emailSent = true;
+    try {
+      await sendOtpEmail({ to: user.email, code });
+    } catch (e) {
+      // On garde le compte créé pour éviter que l'utilisateur soit bloqué (email déjà utilisé)
+      // Il pourra cliquer sur "Renvoyer le code" après correction de la config email.
+      emailSent = false;
+      console.error("❌ OTP email send failed (register):", e?.message || e);
+    }
 
     // On ne renvoie PAS de token tant que le compte n'est pas vérifié
     res.status(201).json({
-      message: "Compte créé. Un code OTP a été envoyé à votre email.",
+      message: emailSent
+        ? "Compte créé. Un code OTP a été envoyé à votre email."
+        : "Compte créé. Envoi OTP indisponible pour le moment. Utilisez \"Renvoyer le code\".",
       email: user.email,
+      emailSent,
     });
   } catch (err) {
     next(err);
@@ -158,9 +169,15 @@ export async function resendOtp(req, res, next) {
       consumedAt: null,
     });
 
-    await sendOtpEmail({ to: user.email, code });
-
-    return res.json({ message: "Nouveau code envoyé" });
+    try {
+      await sendOtpEmail({ to: user.email, code });
+      return res.json({ message: "Nouveau code envoyé" });
+    } catch (e) {
+      console.error("❌ OTP email send failed (resend):", e?.message || e);
+      return res
+        .status(503)
+        .json({ message: "Envoi email indisponible. Réessayez plus tard." });
+    }
   } catch (err) {
     next(err);
   }
