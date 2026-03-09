@@ -13,7 +13,7 @@ import adminRoutes from "./routes/admin.routes.js";
 const app = express();
 
 // 🔥 Liste des origines autorisées
-const allowedOrigins = ["http://localhost:5173", "https://seat-go.vercel.app"];
+const allowedOrigins = ["http://localhost:5173", "https://seat-go.vercel.app", "https://seatgo.netlify.app/"];
 
 app.use(
   cors({
