@@ -44,24 +44,6 @@ export async function sendOtpEmail({ to, code }) {
   const expiresMin = Number(process.env.OTP_EXPIRES_MIN || 10);
   const { subject, text, html } = getOtpTemplate(code, expiresMin);
 
-  console.log("📨 MAIL DEBUG", {
-    hasSendGrid: hasSendGrid(),
-    hasResend: hasResend(),
-    hasSmtp: hasSmtp(),
-    SENDGRID_API_KEY: Boolean(process.env.SENDGRID_API_KEY),
-    RESEND_API_KEY: Boolean(process.env.RESEND_API_KEY),
-    RESEND_API_KEY_LEN: process.env.RESEND_API_KEY?.length || 0,
-    SMTP_HOST: Boolean(process.env.SMTP_HOST),
-    SMTP_PORT: Boolean(process.env.SMTP_PORT),
-    SMTP_USER: Boolean(process.env.SMTP_USER),
-    SMTP_PASS: Boolean(process.env.SMTP_PASS),
-    MAIL_FROM: process.env.MAIL_FROM || null,
-    SENDGRID_FROM: process.env.SENDGRID_FROM || null,
-    RESEND_FROM: process.env.RESEND_FROM || null,
-    SMTP_FROM: process.env.SMTP_FROM || null,
-    to,
-  });
-
   // 1) PRIORITÉ: SENDGRID
   if (hasSendGrid()) {
     const from =
@@ -101,8 +83,6 @@ export async function sendOtpEmail({ to, code }) {
         raw = null;
       }
 
-      console.log("📨 SENDGRID STATUS:", resp.status);
-
       if (!resp.ok) {
         console.error("❌ SendGrid error:", raw || resp.statusText);
         throw new Error(`SendGrid: ${raw || resp.statusText}`);
@@ -123,44 +103,36 @@ export async function sendOtpEmail({ to, code }) {
       process.env.RESEND_FROM ||
       "SeatGo <onboarding@resend.dev>";
 
+    const resp = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject,
+        html,
+        text,
+      }),
+    });
+
+    let payload = null;
     try {
-      const resp = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to: [to],
-          subject,
-          html,
-          text,
-        }),
-      });
-
-      let payload = null;
-      try {
-        payload = await resp.json();
-      } catch {
-        payload = null;
-      }
-
-      console.log("📨 RESEND STATUS:", resp.status);
-      console.log("📨 RESEND PAYLOAD:", payload);
-
-      if (!resp.ok) {
-        const msg = payload?.message || payload?.error || resp.statusText;
-        console.error("❌ Resend error:", payload || msg);
-        throw new Error(`Resend: ${msg}`);
-      }
-
-      console.log("✅ OTP email envoyé (Resend):", payload?.id || payload);
-      return;
-    } catch (error) {
-      console.error("❌ Resend send failed:", error?.message || error);
-      throw error;
+      payload = await resp.json();
+    } catch {
+      payload = null;
     }
+
+    if (!resp.ok) {
+      const msg = payload?.message || payload?.error || resp.statusText;
+      console.error("❌ Resend error:", payload || msg);
+      throw new Error(`Resend: ${msg}`);
+    }
+
+    console.log("✅ OTP email envoyé (Resend):", payload?.id || payload);
+    return;
   }
 
   // 3) FALLBACK: SMTP
@@ -190,25 +162,19 @@ export async function sendOtpEmail({ to, code }) {
 
     const from = process.env.SMTP_FROM || `SeatGo <${process.env.SMTP_USER}>`;
 
-    try {
-      await transporter.sendMail({
-        from,
-        to,
-        subject,
-        text,
-        html,
-      });
+    await transporter.sendMail({
+      from,
+      to,
+      subject,
+      text,
+      html,
+    });
 
-      console.log(`✅ OTP email envoyé (SMTP) à ${to}`);
-      return;
-    } catch (error) {
-      console.error("❌ SMTP send failed:", error?.message || error);
-      throw error;
-    }
+    console.log(`✅ OTP email envoyé (SMTP) à ${to}`);
+    return;
   }
 
   // 4) DEV MODE
-  console.log("⚠️ Aucun provider mail détecté. Bascule en DEV MODE.");
   console.log(
     `\n🔐 [SeatGo OTP - DEV] ${to}: ${code} (expire dans ${expiresMin} min)\n`
   );

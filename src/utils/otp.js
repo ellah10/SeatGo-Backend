@@ -1,7 +1,5 @@
-import crypto from "crypto";
-
 export function generateOtp6() {
-  return String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+  return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
 }
 
 export function otpExpiresAt() {
