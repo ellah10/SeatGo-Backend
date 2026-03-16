@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 import app from "./src/app.js";
 import { ensureAdminAccount } from "./src/utils/ensureAdmin.js";
+import { hasEmailProviderConfigured } from "./src/utils/mailer.js";
 
 dotenv.config();
 
@@ -17,5 +18,6 @@ mongoose
 
 app.listen(PORT, () => {
   console.log(`🚀 API prête sur http://localhost:${PORT}`);
+  console.log("📧 Nodemailer/SMTP =", hasEmailProviderConfigured() ? "CONFIGURÉ" : "NON CONFIGURÉ");
 });
 console.log("MONGO_URI =", process.env.MONGO_URI ? "OK" : "MANQUANT");

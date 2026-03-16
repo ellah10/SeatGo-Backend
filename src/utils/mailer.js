@@ -1,38 +1,50 @@
 import nodemailer from "nodemailer";
 
-function hasSendGrid() {
-  return Boolean(process.env.SENDGRID_API_KEY);
-}
+let cachedTransporter = null;
+let transporterChecked = false;
 
-function hasResend() {
-  return Boolean(process.env.RESEND_API_KEY);
+function getEnv(name, fallback = "") {
+  const value = process.env[name];
+  return typeof value === "string" ? value.trim() : fallback;
 }
 
 function hasSmtp() {
-  return Boolean(
-    process.env.SMTP_HOST &&
-      process.env.SMTP_PORT &&
-      process.env.SMTP_USER &&
-      process.env.SMTP_PASS
-  );
+  const user = getEnv("SMTP_USER");
+  const pass = getEnv("SMTP_PASS");
+  const service = getEnv("SMTP_SERVICE");
+  const host = getEnv("SMTP_HOST");
+
+  return Boolean(user && pass && (service || host));
+}
+
+function parseBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return fallback;
+
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "n", "off"].includes(normalized)) return false;
+  return fallback;
 }
 
 function getOtpTemplate(code, expiresMin) {
   const subject = "Votre code OTP SeatGo";
 
-  const text = `Votre code de vérification SeatGo est : ${code}
-
-Ce code expire dans ${expiresMin} minutes.`;
+  const text = `Bonjour,\n\nVotre code de vérification SeatGo est : ${code}\n\nCe code expire dans ${expiresMin} minute(s).\nSi vous n'êtes pas à l'origine de cette demande, ignorez simplement cet email.`;
 
   const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;max-width:560px;margin:0 auto;padding:24px;">
       <h2 style="margin:0 0 12px;color:#1e4b9b;">Code de vérification SeatGo</h2>
-      <p style="margin:0 0 12px;">Voici votre code OTP :</p>
-      <div style="font-size:28px;font-weight:700;letter-spacing:4px;color:#27b36a;margin:16px 0;">
+      <p style="margin:0 0 12px;">Bonjour,</p>
+      <p style="margin:0 0 12px;">Voici votre code OTP pour confirmer votre compte SeatGo :</p>
+      <div style="font-size:32px;font-weight:700;letter-spacing:6px;color:#27b36a;margin:20px 0;">
         ${code}
       </div>
       <p style="margin:12px 0 0;color:#6b7280;">
         Ce code expire dans ${expiresMin} minute(s).
+      </p>
+      <p style="margin:8px 0 0;color:#6b7280;">
+        Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet email.
       </p>
     </div>
   `;
@@ -40,152 +52,96 @@ Ce code expire dans ${expiresMin} minutes.`;
   return { subject, text, html };
 }
 
-export async function sendOtpEmail({ to, code }) {
-  const expiresMin = Number(process.env.OTP_EXPIRES_MIN || 10);
-  const { subject, text, html } = getOtpTemplate(code, expiresMin);
-
-  // 1) PRIORITÉ: SENDGRID
-  if (hasSendGrid()) {
-    const from =
-      process.env.MAIL_FROM ||
-      process.env.SENDGRID_FROM ||
-      "SeatGo <noreply@seatgo.app>";
-
-    try {
-      const resp = await fetch("https://api.sendgrid.com/v3/mail/send", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          personalizations: [
-            {
-              to: [{ email: to }],
-              subject,
-            },
-          ],
-          from: {
-            email: extractEmail(from),
-            name: extractName(from) || "SeatGo",
-          },
-          content: [
-            { type: "text/plain", value: text },
-            { type: "text/html", value: html },
-          ],
-        }),
-      });
-
-      let raw = null;
-      try {
-        raw = await resp.text();
-      } catch {
-        raw = null;
-      }
-
-      if (!resp.ok) {
-        console.error("❌ SendGrid error:", raw || resp.statusText);
-        throw new Error(`SendGrid: ${raw || resp.statusText}`);
-      }
-
-      console.log(`✅ OTP email envoyé (SendGrid) à ${to}`);
-      return;
-    } catch (error) {
-      console.error("❌ SendGrid send failed:", error?.message || error);
-      throw error;
-    }
-  }
-
-  // 2) FALLBACK: RESEND
-  if (hasResend()) {
-    const from =
-      process.env.MAIL_FROM ||
-      process.env.RESEND_FROM ||
-      "SeatGo <onboarding@resend.dev>";
-
-    const resp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject,
-        html,
-        text,
-      }),
-    });
-
-    let payload = null;
-    try {
-      payload = await resp.json();
-    } catch {
-      payload = null;
-    }
-
-    if (!resp.ok) {
-      const msg = payload?.message || payload?.error || resp.statusText;
-      console.error("❌ Resend error:", payload || msg);
-      throw new Error(`Resend: ${msg}`);
-    }
-
-    console.log("✅ OTP email envoyé (Resend):", payload?.id || payload);
-    return;
-  }
-
-  // 3) FALLBACK: SMTP
-  if (hasSmtp()) {
-    const port = Number(process.env.SMTP_PORT);
-    const secure = port === 465;
-
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port,
-      secure,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      connectionTimeout: 60_000,
-      socketTimeout: 60_000,
-    });
-
-    try {
-      await transporter.verify();
-      console.log("✅ SMTP prêt");
-    } catch (e) {
-      console.error("❌ SMTP verify error:", e?.message || e);
-      throw e;
-    }
-
-    const from = process.env.SMTP_FROM || `SeatGo <${process.env.SMTP_USER}>`;
-
-    await transporter.sendMail({
-      from,
-      to,
-      subject,
-      text,
-      html,
-    });
-
-    console.log(`✅ OTP email envoyé (SMTP) à ${to}`);
-    return;
-  }
-
-  // 4) DEV MODE
-  console.log(
-    `\n🔐 [SeatGo OTP - DEV] ${to}: ${code} (expire dans ${expiresMin} min)\n`
+function getFromAddress() {
+  return (
+    getEnv("SMTP_FROM") ||
+    getEnv("MAIL_FROM") ||
+    (getEnv("SMTP_USER") ? `SeatGo <${getEnv("SMTP_USER")}>` : "SeatGo <noreply@seatgo.app>")
   );
 }
 
-function extractEmail(from) {
-  const match = from.match(/<(.+?)>/);
-  return match ? match[1].trim() : from.trim();
+function buildSmtpConfig() {
+  const service = getEnv("SMTP_SERVICE");
+  const user = getEnv("SMTP_USER");
+  const pass = getEnv("SMTP_PASS");
+
+  if (service) {
+    return {
+      service,
+      auth: {
+        user,
+        pass,
+      },
+    };
+  }
+
+  const host = getEnv("SMTP_HOST");
+  const port = Number(getEnv("SMTP_PORT", "587") || 587);
+  const secure =
+    typeof process.env.SMTP_SECURE === "string"
+      ? parseBoolean(process.env.SMTP_SECURE, port === 465)
+      : port === 465;
+
+  return {
+    host,
+    port,
+    secure,
+    auth: {
+      user,
+      pass,
+    },
+    connectionTimeout: 60_000,
+    greetingTimeout: 30_000,
+    socketTimeout: 60_000,
+  };
 }
 
-function extractName(from) {
-  const match = from.match(/^(.*?)</);
-  return match ? match[1].trim().replace(/^"|"$/g, "") : "";
+function getSmtpTransporter() {
+  if (!cachedTransporter) {
+    cachedTransporter = nodemailer.createTransport(buildSmtpConfig());
+  }
+
+  return cachedTransporter;
+}
+
+async function sendWithSmtp({ to, subject, text, html }) {
+  const transporter = getSmtpTransporter();
+
+  if (!transporterChecked) {
+    await transporter.verify();
+    transporterChecked = true;
+    console.log("✅ Nodemailer/SMTP prêt");
+  }
+
+  const info = await transporter.sendMail({
+    from: getFromAddress(),
+    to,
+    subject,
+    text,
+    html,
+  });
+
+  console.log(`✅ OTP email envoyé à ${to}`, info?.messageId ? `- ${info.messageId}` : "");
+}
+
+export async function sendOtpEmail({ to, code }) {
+  if (!hasSmtp()) {
+    throw new Error(
+      "Configuration Nodemailer manquante. Configure SMTP_SERVICE/SMTP_USER/SMTP_PASS ou SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS."
+    );
+  }
+
+  const expiresMin = Number(getEnv("OTP_EXPIRES_MIN", "10") || 10);
+  const { subject, text, html } = getOtpTemplate(code, expiresMin);
+
+  try {
+    await sendWithSmtp({ to, subject, text, html });
+  } catch (error) {
+    console.error("❌ Nodemailer/SMTP send failed:", error?.message || error);
+    throw error;
+  }
+}
+
+export function hasEmailProviderConfigured() {
+  return hasSmtp();
 }
