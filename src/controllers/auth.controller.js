@@ -10,18 +10,35 @@ export async function register(req, res, next) {
   try {
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Validation error", errors: parsed.error.flatten() });
+      return res.status(400).json({
+        message: "Validation error",
+        errors: parsed.error.flatten(),
+      });
     }
 
-    const { email, password, studentCardNumber, firstName = "", lastName = "", phone = "" } = parsed.data;
+    const {
+      email,
+      password,
+      studentCardNumber,
+      firstName = "",
+      lastName = "",
+      phone = "",
+    } = parsed.data;
 
     const exists = await User.findOne({ email });
-    if (exists) return res.status(409).json({ message: "Email déjà utilisé" });
+    if (exists) {
+      return res.status(409).json({ message: "Email déjà utilisé" });
+    }
 
     const cardExists = await User.findOne({ studentCardNumber });
-    if (cardExists) return res.status(409).json({ message: "Numéro de carte étudiant déjà utilisé" });
+    if (cardExists) {
+      return res
+        .status(409)
+        .json({ message: "Numéro de carte étudiant déjà utilisé" });
+    }
 
     const passwordHash = await bcrypt.hash(password, 10);
+
     const user = await User.create({
       email,
       passwordHash,
@@ -32,7 +49,6 @@ export async function register(req, res, next) {
       isVerified: false,
     });
 
-    // Génère et envoie OTP
     const code = generateOtp6();
     const codeHash = await bcrypt.hash(code, 10);
 
@@ -44,23 +60,15 @@ export async function register(req, res, next) {
       consumedAt: null,
     });
 
-    let emailSent = true;
-    try {
-      await sendOtpEmail({ to: user.email, code });
-    } catch (e) {
-      // On garde le compte créé pour éviter que l'utilisateur soit bloqué (email déjà utilisé)
-      // Il pourra cliquer sur "Renvoyer le code" après correction de la config email.
-      emailSent = false;
-      console.error("❌ OTP email send failed (register):", e?.message || e);
-    }
+    // Envoi OTP en arrière-plan pour accélérer la réponse
+    sendOtpEmail({ to: user.email, code }).catch((e) => {
+      console.error("❌ OTP email send failed (register/background):", e?.message || e);
+    });
 
-    // On ne renvoie PAS de token tant que le compte n'est pas vérifié
-    res.status(201).json({
-      message: emailSent
-        ? "Compte créé. Un code OTP a été envoyé à votre email."
-        : "Compte créé. Envoi OTP indisponible pour le moment. Utilisez \"Renvoyer le code\".",
+    return res.status(201).json({
+      message: "Compte créé. Vérifiez votre email pour le code OTP.",
       email: user.email,
-      emailSent,
+      emailSent: true,
     });
   } catch (err) {
     next(err);
@@ -173,7 +181,7 @@ export async function resendOtp(req, res, next) {
       await sendOtpEmail({ to: user.email, code });
       return res.json({ message: "Nouveau code envoyé" });
     } catch (e) {
-      console.error("❌ OTP email send failed (resend):", e?.message || e);
+      console.error("OTP email send failed (resend):", e?.message || e);
       return res
         .status(503)
         .json({ message: "Envoi email indisponible. Réessayez plus tard." });

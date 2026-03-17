@@ -56,7 +56,9 @@ function getFromAddress() {
   return (
     getEnv("SMTP_FROM") ||
     getEnv("MAIL_FROM") ||
-    (getEnv("SMTP_USER") ? `SeatGo <${getEnv("SMTP_USER")}>` : "SeatGo <noreply@seatgo.app>")
+    (getEnv("SMTP_USER")
+      ? `SeatGo <${getEnv("SMTP_USER")}>`
+      : "SeatGo <noreply@seatgo.app>")
   );
 }
 
@@ -104,14 +106,17 @@ function getSmtpTransporter() {
   return cachedTransporter;
 }
 
+export async function warmupMailer() {
+  if (!hasSmtp() || transporterChecked) return;
+
+  const transporter = getSmtpTransporter();
+  await transporter.verify();
+  transporterChecked = true;
+  console.log("✅ Nodemailer/SMTP prêt");
+}
+
 async function sendWithSmtp({ to, subject, text, html }) {
   const transporter = getSmtpTransporter();
-
-  if (!transporterChecked) {
-    await transporter.verify();
-    transporterChecked = true;
-    console.log("✅ Nodemailer/SMTP prêt");
-  }
 
   const info = await transporter.sendMail({
     from: getFromAddress(),
@@ -121,7 +126,10 @@ async function sendWithSmtp({ to, subject, text, html }) {
     html,
   });
 
-  console.log(`✅ OTP email envoyé à ${to}`, info?.messageId ? `- ${info.messageId}` : "");
+  console.log(
+    `✅ OTP email envoyé à ${to}`,
+    info?.messageId ? `- ${info.messageId}` : ""
+  );
 }
 
 export async function sendOtpEmail({ to, code }) {
@@ -137,7 +145,7 @@ export async function sendOtpEmail({ to, code }) {
   try {
     await sendWithSmtp({ to, subject, text, html });
   } catch (error) {
-    console.error("❌ Nodemailer/SMTP send failed:", error?.message || error);
+    console.error("Nodemailer/SMTP send failed:", error?.message || error);
     throw error;
   }
 }
