@@ -19,7 +19,6 @@ export async function adminLogin(req, res, next) {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ message: "Identifiants invalides" });
 
-    // Admin n'a pas besoin d'OTP, mais on garde la compat si tu veux l'activer plus tard
     if (!user.isVerified) {
       user.isVerified = true;
       await user.save();

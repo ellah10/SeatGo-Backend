@@ -27,21 +27,17 @@ const updateProfileSchema = z
   })
   .strict();
 
-/**
- * GET /api/profile/me
- */
+
 export async function getMyProfile(req, res, next) {
   try {
-    // requireAuth a déjà injecté req.user (sans passwordHash)
+
     return res.json({ user: toClientUser(req.user) });
   } catch (err) {
     next(err);
   }
 }
 
-/**
- * PUT /api/profile/me
- */
+
 export async function updateMyProfile(req, res, next) {
   try {
     const parsed = updateProfileSchema.safeParse(req.body);
@@ -51,13 +47,11 @@ export async function updateMyProfile(req, res, next) {
 
     const updates = parsed.data;
 
-    // Nettoyage léger
     if (typeof updates.firstName === "string") updates.firstName = updates.firstName.trim();
     if (typeof updates.lastName === "string") updates.lastName = updates.lastName.trim();
     if (typeof updates.phone === "string") updates.phone = updates.phone.trim();
     if (typeof updates.studentCardNumber === "string") updates.studentCardNumber = updates.studentCardNumber.trim();
 
-    // Unicité carte étudiant si changement
     if (
       updates.studentCardNumber &&
       updates.studentCardNumber !== req.user.studentCardNumber
@@ -75,7 +69,6 @@ export async function updateMyProfile(req, res, next) {
 
     return res.json({ user: toClientUser(user) });
   } catch (err) {
-    // duplicate key error fallback
     if (err?.code === 11000) {
       if (err?.keyPattern?.studentCardNumber) {
         return res.status(409).json({ message: "Numéro de carte étudiant déjà utilisé" });
@@ -88,10 +81,7 @@ export async function updateMyProfile(req, res, next) {
   }
 }
 
-/**
- * POST /api/profile/me/avatar
- * multipart/form-data: avatar=<file>
- */
+
 export async function uploadMyAvatar(req, res, next) {
   try {
     if (!req.file) return res.status(400).json({ message: "Fichier manquant" });

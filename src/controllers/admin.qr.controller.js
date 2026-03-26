@@ -9,18 +9,15 @@ function parseLookup(rawValue) {
   const raw = String(rawValue || "").trim();
   if (!raw) return { error: "Valeur QR/code manquante" };
 
-  // Cas 1: QR contient une URL du type .../ticket/<bookingId>
   const m = raw.match(/\/ticket\/([a-f0-9]{24})(?:[?#/].*)?$/i);
   if (m && mongoose.Types.ObjectId.isValid(m[1])) {
     return { kind: "id", value: m[1] };
   }
-
-  // Cas 2: QR contient directement un ObjectId
   if (mongoose.Types.ObjectId.isValid(raw)) {
     return { kind: "id", value: raw };
   }
 
-  // Cas 3: code réservation (SG-...)
+
   return { kind: "code", value: raw };
 }
 

@@ -2,9 +2,28 @@ import bcrypt from "bcryptjs";
 import { User } from "../models/User.js";
 import { Otp } from "../models/Otp.js";
 import { signToken } from "../utils/jwt.js";
-import { registerSchema, loginSchema, resendOtpSchema, verifyOtpSchema } from "./validators.js";
+import {
+  registerSchema,
+  loginSchema,
+  resendOtpSchema,
+  verifyOtpSchema,
+} from "./validators.js";
 import { generateOtp6, otpExpiresAt } from "../utils/otp.js";
 import { sendOtpEmail } from "../utils/mailer.js";
+
+function toAuthUser(user) {
+  return {
+    id: user._id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    phone: user.phone,
+    role: user.role,
+    studentCardNumber: user.studentCardNumber,
+    avatarUrl: user.avatarUrl || "",
+    isVerified: user.isVerified,
+  };
+}
 
 export async function register(req, res, next) {
   try {
@@ -17,7 +36,6 @@ export async function register(req, res, next) {
     }
 
     const {
-      email,
       password,
       studentCardNumber,
       firstName = "",
@@ -25,12 +43,17 @@ export async function register(req, res, next) {
       phone = "",
     } = parsed.data;
 
-    const exists = await User.findOne({ email });
+    const email = parsed.data.email.trim().toLowerCase();
+
+    const [exists, cardExists] = await Promise.all([
+      User.findOne({ email }).select("_id").lean(),
+      User.findOne({ studentCardNumber }).select("_id").lean(),
+    ]);
+
     if (exists) {
       return res.status(409).json({ message: "Email déjà utilisé" });
     }
 
-    const cardExists = await User.findOne({ studentCardNumber });
     if (cardExists) {
       return res
         .status(409)
@@ -60,7 +83,6 @@ export async function register(req, res, next) {
       consumedAt: null,
     });
 
-    // Envoi OTP en arrière-plan pour accélérer la réponse
     sendOtpEmail({ to: user.email, code }).catch((e) => {
       console.error("❌ OTP email send failed (register/background):", e?.message || e);
     });
@@ -79,27 +101,23 @@ export async function verifyOtp(req, res, next) {
   try {
     const parsed = verifyOtpSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Validation error", errors: parsed.error.flatten() });
+      return res.status(400).json({
+        message: "Validation error",
+        errors: parsed.error.flatten(),
+      });
     }
 
-    const { email, code } = parsed.data;
+    const email = parsed.data.email.trim().toLowerCase();
+    const { code } = parsed.data;
+
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
     if (user.isVerified) {
       const token = signToken({ sub: user._id.toString(), role: user.role });
       return res.json({
         token,
-        user: {
-          id: user._id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          phone: user.phone,
-          role: user.role,
-          studentCardNumber: user.studentCardNumber,
-          avatarUrl: user.avatarUrl || "",
-          isVerified: true,
-        },
+        user: toAuthUser(user),
       });
     }
 
@@ -109,39 +127,36 @@ export async function verifyOtp(req, res, next) {
       expiresAt: { $gt: new Date() },
     }).sort({ createdAt: -1 });
 
-    if (!otp) return res.status(400).json({ message: "Code expiré ou introuvable", code: "OTP_EXPIRED" });
+    if (!otp) {
+      return res
+        .status(400)
+        .json({ message: "Code expiré ou introuvable", code: "OTP_EXPIRED" });
+    }
 
     const maxAttempts = Number(process.env.OTP_MAX_ATTEMPTS || 5);
     if (otp.attempts >= maxAttempts) {
-      return res.status(429).json({ message: "Trop de tentatives", code: "OTP_TOO_MANY_ATTEMPTS" });
+      return res
+        .status(429)
+        .json({ message: "Trop de tentatives", code: "OTP_TOO_MANY_ATTEMPTS" });
     }
 
     const ok = await bcrypt.compare(code, otp.codeHash);
     otp.attempts += 1;
     await otp.save();
 
-    if (!ok) return res.status(400).json({ message: "Code OTP invalide", code: "OTP_INVALID" });
+    if (!ok) {
+      return res.status(400).json({ message: "Code OTP invalide", code: "OTP_INVALID" });
+    }
 
     otp.consumedAt = new Date();
-    await otp.save();
-
     user.isVerified = true;
-    await user.save();
+
+    await Promise.all([otp.save(), user.save()]);
 
     const token = signToken({ sub: user._id.toString(), role: user.role });
     return res.json({
       token,
-      user: {
-        id: user._id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        phone: user.phone,
-        role: user.role,
-        studentCardNumber: user.studentCardNumber,
-        avatarUrl: user.avatarUrl || "",
-        isVerified: true,
-      },
+      user: toAuthUser(user),
     });
   } catch (err) {
     next(err);
@@ -152,18 +167,32 @@ export async function resendOtp(req, res, next) {
   try {
     const parsed = resendOtpSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Validation error", errors: parsed.error.flatten() });
+      return res.status(400).json({
+        message: "Validation error",
+        errors: parsed.error.flatten(),
+      });
     }
 
-    const { email } = parsed.data;
-    const user = await User.findOne({ email });
+    const email = parsed.data.email.trim().toLowerCase();
+    const user = await User.findOne({ email }).select("_id email isVerified").lean();
+
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
     if (user.isVerified) return res.json({ message: "Compte déjà vérifié" });
 
     const cooldownSec = Number(process.env.OTP_RESEND_COOLDOWN_SEC || 60);
-    const last = await Otp.findOne({ userId: user._id }).sort({ createdAt: -1 });
-    if (last && Date.now() - new Date(last.createdAt).getTime() < cooldownSec * 1000) {
-      return res.status(429).json({ message: "Veuillez patienter avant de renvoyer un code", code: "RESEND_COOLDOWN" });
+    const last = await Otp.findOne({ userId: user._id })
+      .sort({ createdAt: -1 })
+      .select("createdAt")
+      .lean();
+
+    if (
+      last &&
+      Date.now() - new Date(last.createdAt).getTime() < cooldownSec * 1000
+    ) {
+      return res.status(429).json({
+        message: "Veuillez patienter avant de renvoyer un code",
+        code: "RESEND_COOLDOWN",
+      });
     }
 
     const code = generateOtp6();
@@ -177,15 +206,11 @@ export async function resendOtp(req, res, next) {
       consumedAt: null,
     });
 
-    try {
-      await sendOtpEmail({ to: user.email, code });
-      return res.json({ message: "Nouveau code envoyé" });
-    } catch (e) {
-      console.error("OTP email send failed (resend):", e?.message || e);
-      return res
-        .status(503)
-        .json({ message: "Envoi email indisponible. Réessayez plus tard." });
-    }
+    sendOtpEmail({ to: user.email, code }).catch((e) => {
+      console.error("OTP email send failed (resend/background):", e?.message || e);
+    });
+
+    return res.json({ message: "Nouveau code envoyé", emailSent: true });
   } catch (err) {
     next(err);
   }
@@ -195,36 +220,36 @@ export async function login(req, res, next) {
   try {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Validation error", errors: parsed.error.flatten() });
+      return res.status(400).json({
+        message: "Validation error",
+        errors: parsed.error.flatten(),
+      });
     }
 
-    const { email, password } = parsed.data;
+    const email = parsed.data.email.trim().toLowerCase();
+    const { password } = parsed.data;
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select(
+      "_id email passwordHash firstName lastName phone role studentCardNumber avatarUrl isVerified"
+    );
+
     if (!user) return res.status(401).json({ message: "Identifiants invalides" });
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ message: "Identifiants invalides" });
 
     if (!user.isVerified) {
-      return res.status(403).json({ message: "Compte non vérifié. Validez l'OTP.", code: "NOT_VERIFIED" });
+      return res.status(403).json({
+        message: "Compte non vérifié. Validez l'OTP.",
+        code: "NOT_VERIFIED",
+      });
     }
 
     const token = signToken({ sub: user._id.toString(), role: user.role });
 
     res.json({
       token,
-      user: {
-        id: user._id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        phone: user.phone,
-        role: user.role,
-        studentCardNumber: user.studentCardNumber,
-        avatarUrl: user.avatarUrl || "",
-        isVerified: user.isVerified,
-      },
+      user: toAuthUser(user),
     });
   } catch (err) {
     next(err);
@@ -232,6 +257,5 @@ export async function login(req, res, next) {
 }
 
 export async function me(req, res) {
-  // requireAuth a déjà mis req.user
   res.json({ user: req.user });
 }

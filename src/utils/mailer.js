@@ -112,7 +112,7 @@ export async function warmupMailer() {
   const transporter = getSmtpTransporter();
   await transporter.verify();
   transporterChecked = true;
-  console.log("✅ Nodemailer/SMTP prêt");
+  console.log(" Nodemailer/SMTP prêt");
 }
 
 async function sendWithSmtp({ to, subject, text, html }) {
@@ -127,7 +127,7 @@ async function sendWithSmtp({ to, subject, text, html }) {
   });
 
   console.log(
-    `✅ OTP email envoyé à ${to}`,
+    ` OTP email envoyé à ${to}`,
     info?.messageId ? `- ${info.messageId}` : ""
   );
 }

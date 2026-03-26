@@ -7,11 +7,9 @@ export async function listTrips(req, res, next) {
 
     const filter = {};
 
-    // Par défaut, on ne sert que les départs actifs côté étudiant/public.
-    // On garde la compatibilité avec les anciens documents qui n'ont pas de champ `status`.
     filter.$or = [{ status: { $exists: false } }, { status: "ACTIVE" }];
 
-    // ✅ Recherche partielle + insensible à la casse
+
     if (departure) {
       filter.departure = { $regex: departure.trim(), $options: "i" };
     }
@@ -20,7 +18,6 @@ export async function listTrips(req, res, next) {
       filter.destination = { $regex: destination.trim(), $options: "i" };
     }
 
-    // ✅ Date exact (format "YYYY-MM-DD" comme dans ta DB)
     if (date) {
       filter.date = date;
     }
@@ -48,7 +45,6 @@ export async function getTripSeats(req, res, next) {
     const trip = await Trip.findById(tripId);
     if (!trip) return res.status(404).json({ message: "Trajet introuvable" });
 
-    // sièges pris = bookings actifs
     const bookings = await Booking.find({
       tripId,
       status: { $in: ["PENDING_PAYMENT", "PAID"] },

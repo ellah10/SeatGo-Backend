@@ -2,11 +2,10 @@ export function notFound(req, res) {
   res.status(404).json({ message: "Route introuvable" });
 }
 
-/** eslint-disable no-unused-vars */
-export function errorHandler(err, req, res, next) {
-  console.error("❌", err);
 
-  // Erreur Mongo duplicate key (ex: siège déjà pris)
+export function errorHandler(err, req, res, next) {
+  console.error("", err);
+
   if (err?.code === 11000) {
     return res.status(409).json({
       message: "Conflit: ressource déjà existante",

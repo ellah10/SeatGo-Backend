@@ -31,20 +31,17 @@ function getRangeDates(range = "today") {
   }
 
   if (range === "week") {
-    // 7 derniers jours (incluant aujourd'hui)
     const from = startOfDay(new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000));
     const to = endOfDay(now);
     return { from, to };
   }
 
   if (range === "month") {
-    // 30 derniers jours (incluant aujourd'hui)
     const from = startOfDay(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000));
     const to = endOfDay(now);
     return { from, to };
   }
 
-  // today
   return { from: startOfDay(now), to: endOfDay(now) };
 }
 
@@ -53,190 +50,122 @@ export async function getAdminDashboard(req, res, next) {
     const range = (req.query.range || "today").toString();
     const { from, to } = getRangeDates(range);
 
-    const match = { createdAt: { $gte: from, $lte: to } };
+    const bookingRangeMatch = { createdAt: { $gte: from, $lte: to } };
+    const bookedStatuses = ["PENDING_PAYMENT", "PAID", "USED"];
+    const fromDate = dateToYMD(from);
+    const toDate = dateToYMD(to);
 
-    const byStatus = await Booking.aggregate([
-      { $match: match },
-      { $group: { _id: "$status", count: { $sum: 1 } } },
+    const [byStatus, trips] = await Promise.all([
+      Booking.aggregate([
+        { $match: bookingRangeMatch },
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]),
+      Trip.find({
+        date: { $gte: fromDate, $lte: toDate },
+        status: "ACTIVE",
+      })
+        .select("departure destination date departureTime capacity")
+        .lean(),
     ]);
 
-    const statusMap = byStatus.reduce((acc, it) => {
-      acc[it._id] = it.count;
+    const statusMap = byStatus.reduce((acc, item) => {
+      acc[item._id] = item.count;
       return acc;
     }, {});
 
-    const totalBookings = byStatus.reduce((sum, it) => sum + it.count, 0);
+    const totalBookings = byStatus.reduce((sum, item) => sum + item.count, 0);
     const pendingPayment = statusMap.PENDING_PAYMENT || 0;
     const paid = statusMap.PAID || 0;
     const cancelled = statusMap.CANCELLED || 0;
     const used = statusMap.USED || 0;
 
-    // -----------------------------
-    // Statistiques enrichies (réelles par départ)
-    // - basées sur les départs (Trip.date) qui tombent dans la période
-    // - et les réservations liées à ces trips
-    // -----------------------------
-    const fromDate = dateToYMD(from);
-    const toDate = dateToYMD(to);
+    const tripIds = trips.map((trip) => trip._id);
 
-    const tripMatch = {
-      date: { $gte: fromDate, $lte: toDate },
-      status: "ACTIVE",
-    };
-
-    const bookedStatuses = ["PENDING_PAYMENT", "PAID", "USED"];
-
-    // Fill rate global sur les départs de la période (plus "réel" que par createdAt)
-    const fillAgg = await Trip.aggregate([
-      { $match: tripMatch },
-      {
-        $lookup: {
-          from: "bookings",
-          let: { tid: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$tripId", "$$tid"] },
-                status: { $in: bookedStatuses },
-              },
+    const bookingsByTripAgg = tripIds.length
+      ? await Booking.aggregate([
+          {
+            $match: {
+              tripId: { $in: tripIds },
+              status: { $in: bookedStatuses },
             },
-            { $count: "cnt" },
-          ],
-          as: "bk",
-        },
-      },
-      {
-        $addFields: {
-          booked: { $ifNull: [{ $arrayElemAt: ["$bk.cnt", 0] }, 0] },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          departuresTotal: { $sum: 1 },
-          seatsBooked: { $sum: "$booked" },
-          totalCapacity: { $sum: "$capacity" },
-        },
-      },
-    ]);
+          },
+          {
+            $group: {
+              _id: "$tripId",
+              booked: { $sum: 1 },
+            },
+          },
+        ])
+      : [];
 
-    const depTotals = fillAgg?.[0] || {
-      departuresTotal: 0,
-      seatsBooked: 0,
-      totalCapacity: 0,
-    };
+    const bookedByTrip = new Map(
+      bookingsByTripAgg.map((item) => [String(item._id), item.booked])
+    );
+
+    const departures = trips.map((trip) => {
+      const booked = bookedByTrip.get(String(trip._id)) || 0;
+      const capacity = Number(trip.capacity) || 0;
+      const fill = capacity > 0 ? Math.round((booked / capacity) * 100) : 0;
+
+      return {
+        _id: trip._id,
+        departure: trip.departure,
+        destination: trip.destination,
+        date: trip.date,
+        departureTime: trip.departureTime,
+        capacity,
+        booked,
+        fill,
+      };
+    });
+
+    const depTotals = departures.reduce(
+      (acc, trip) => {
+        acc.departuresTotal += 1;
+        acc.seatsBooked += trip.booked;
+        acc.totalCapacity += trip.capacity;
+        return acc;
+      },
+      { departuresTotal: 0, seatsBooked: 0, totalCapacity: 0 }
+    );
+
     const fillRate =
       depTotals.totalCapacity > 0
         ? Math.round((depTotals.seatsBooked / depTotals.totalCapacity) * 100)
         : 0;
 
-    // Top départs par taux de remplissage (dans la période)
-    const topDepartures = await Trip.aggregate([
-      { $match: tripMatch },
-      {
-        $lookup: {
-          from: "bookings",
-          let: { tid: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$tripId", "$$tid"] },
-                status: { $in: bookedStatuses },
-              },
-            },
-            { $count: "cnt" },
-          ],
-          as: "bk",
-        },
-      },
-      {
-        $addFields: {
-          booked: { $ifNull: [{ $arrayElemAt: ["$bk.cnt", 0] }, 0] },
-          fill: {
-            $cond: [
-              { $gt: ["$capacity", 0] },
-              { $round: [{ $multiply: [{ $divide: ["$booked", "$capacity"] }, 100] }, 0] },
-              0,
-            ],
-          },
-        },
-      },
-      {
-        $project: {
-          _id: 1,
-          departure: 1,
-          destination: 1,
-          date: 1,
-          departureTime: 1,
-          capacity: 1,
-          booked: 1,
-          fill: 1,
-        },
-      },
-      { $sort: { fill: -1, booked: -1 } },
-      { $limit: 8 },
-    ]);
+    const topDepartures = [...departures]
+      .sort((a, b) => b.fill - a.fill || b.booked - a.booked)
+      .slice(0, 8);
 
-    // Top trajets (routes) : somme des réservations sur les départs de la période
-    const topRoutes = await Trip.aggregate([
-      { $match: tripMatch },
-      {
-        $lookup: {
-          from: "bookings",
-          let: { tid: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$tripId", "$$tid"] },
-                status: { $in: bookedStatuses },
-              },
-            },
-            { $count: "cnt" },
-          ],
-          as: "bk",
-        },
-      },
-      {
-        $addFields: {
-          booked: { $ifNull: [{ $arrayElemAt: ["$bk.cnt", 0] }, 0] },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            departure: "$departure",
-            destination: "$destination",
-          },
-          departuresCount: { $sum: 1 },
-          booked: { $sum: "$booked" },
-          capacity: { $sum: "$capacity" },
-        },
-      },
-      {
-        $addFields: {
-          fill: {
-            $cond: [
-              { $gt: ["$capacity", 0] },
-              { $round: [{ $multiply: [{ $divide: ["$booked", "$capacity"] }, 100] }, 0] },
-              0,
-            ],
-          },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          departure: "$_id.departure",
-          destination: "$_id.destination",
-          departuresCount: 1,
-          booked: 1,
-          capacity: 1,
-          fill: 1,
-        },
-      },
-      { $sort: { booked: -1, fill: -1 } },
-      { $limit: 6 },
-    ]);
+    const routesMap = new Map();
+
+    for (const trip of departures) {
+      const key = `${trip.departure}__${trip.destination}`;
+      const current = routesMap.get(key) || {
+        departure: trip.departure,
+        destination: trip.destination,
+        departuresCount: 0,
+        booked: 0,
+        capacity: 0,
+      };
+
+      current.departuresCount += 1;
+      current.booked += trip.booked;
+      current.capacity += trip.capacity;
+      routesMap.set(key, current);
+    }
+
+    const topRoutes = [...routesMap.values()]
+      .map((route) => ({
+        ...route,
+        fill:
+          route.capacity > 0
+            ? Math.round((route.booked / route.capacity) * 100)
+            : 0,
+      }))
+      .sort((a, b) => b.booked - a.booked || b.fill - a.fill)
+      .slice(0, 6);
 
     return res.json({
       range,

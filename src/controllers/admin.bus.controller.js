@@ -52,7 +52,6 @@ export async function getBus(req, res, next) {
 
 export async function createBus(req, res, next) {
   try {
-    // seats peut arriver en string si form => cast côté backend
     const body = { ...req.body };
     if (typeof body.seats === "string") body.seats = Number(body.seats);
 

@@ -11,7 +11,6 @@ const busSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Recommandé: nom unique côté université
 busSchema.index({ name: 1 }, { unique: true });
 
 export const Bus = mongoose.model("Bus", busSchema);

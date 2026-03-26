@@ -162,7 +162,6 @@ export async function updateAdminTrip(req, res, next) {
       if (!bus) return res.status(404).json({ message: "Bus introuvable" });
     }
 
-    // Si l'admin change de bus mais ne fournit pas de capacité, on aligne sur seats
     let capacity = payload.capacity;
     if (capacity === undefined) {
       if (busChanged && bus) capacity = bus.seats;

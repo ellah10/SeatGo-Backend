@@ -11,7 +11,7 @@ const bookingSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ["PENDING_PAYMENT", "PAID", "CANCELLED", "USED"],
-      default: "PAID", // pour coller à ton paiement simulé
+      default: "PAID",
     },
 
     payment: {
@@ -24,11 +24,6 @@ const bookingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-/**
- * IMPORTANT: empêcher double réservation d'un siège sur un même trip
- * - unique index (tripId + seatNumber) UNIQUEMENT quand status est actif
- * - status actif = PENDING_PAYMENT ou PAID
- */
 bookingSchema.index(
   { tripId: 1, seatNumber: 1 },
   {
@@ -36,5 +31,9 @@ bookingSchema.index(
     partialFilterExpression: { status: { $in: ["PENDING_PAYMENT", "PAID"] } },
   }
 );
+bookingSchema.index({ userId: 1, createdAt: -1 });
+bookingSchema.index({ userId: 1, status: 1 });
+bookingSchema.index({ tripId: 1, status: 1 });
+bookingSchema.index({ createdAt: 1, status: 1 });
 
 export const Booking = mongoose.model("Booking", bookingSchema);

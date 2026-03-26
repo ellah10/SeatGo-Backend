@@ -21,7 +21,7 @@ export async function listAdminBookings(req, res, next) {
     const {
       q = "",
       status,
-      date, // filtre par date du trajet (Trip.date = YYYY-MM-DD)
+      date, 
       tripId,
       page = "1",
       limit = "20",
@@ -31,13 +31,11 @@ export async function listAdminBookings(req, res, next) {
     const limitNum = Math.min(toInt(limit, 20), 100);
 
     const filter = {};
-
-    // status
+    
     if (status && STATUS.includes(String(status))) {
       filter.status = String(status);
     }
 
-    // tripId direct
     if (tripId) {
       const id = String(tripId);
       if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -46,7 +44,6 @@ export async function listAdminBookings(req, res, next) {
       filter.tripId = id;
     }
 
-    // date (Trip.date)
     if (date) {
       const dateStr = String(date).trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -66,7 +63,6 @@ export async function listAdminBookings(req, res, next) {
       }
     }
 
-    // q: bookingCode ou étudiant
     const qStr = String(q).trim();
     if (qStr) {
       const rx = { $regex: qStr, $options: "i" };
@@ -176,7 +172,6 @@ export async function updateAdminBookingStatus(req, res, next) {
     const booking = await Booking.findById(id);
     if (!booking) return res.status(404).json({ message: "Réservation introuvable" });
 
-    // règles simples anti-bug
     if (booking.status === "USED" && status !== "USED") {
       return res.status(400).json({ message: "Réservation déjà utilisée (statut verrouillé)" });
     }

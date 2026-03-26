@@ -2,7 +2,6 @@ import multer from "multer";
 import fs from "fs";
 import path from "path";
 
-// Stockage local: /uploads/avatars
 const avatarsDir = path.join(process.cwd(), "uploads", "avatars");
 fs.mkdirSync(avatarsDir, { recursive: true });
 

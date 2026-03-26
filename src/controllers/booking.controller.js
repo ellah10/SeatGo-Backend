@@ -3,7 +3,7 @@ import { Trip } from "../models/Trip.js";
 import { createBookingSchema } from "./validators.js";
 
 function makeBookingCode() {
-  // Ex: SG-1700000000000-4821
+
   const rand = Math.floor(1000 + Math.random() * 9000);
   return `SG-${Date.now()}-${rand}`;
 }
@@ -29,7 +29,6 @@ export async function createBooking(req, res, next) {
       return res.status(400).json({ message: `Siège invalide: max ${trip.capacity}` });
     }
 
-    // Paiement simulé: PAID direct
     const booking = await Booking.create({
       bookingCode: makeBookingCode(),
       userId: req.user._id,
@@ -86,7 +85,6 @@ export async function getBooking(req, res, next) {
     const booking = await Booking.findById(req.params.id).populate("tripId").populate("userId", "firstName lastName email phone");
     if (!booking) return res.status(404).json({ message: "Réservation introuvable" });
 
-    // Ticket public: on renvoie les infos nécessaires au TicketPage
     res.json({
       booking: {
         id: booking._id,
@@ -95,7 +93,7 @@ export async function getBooking(req, res, next) {
         status: booking.status,
         payment: booking.payment,
         trip: booking.tripId,
-        passenger: booking.userId, // optionnel, utile pour afficher nom/tel
+        passenger: booking.userId, 
         createdAt: booking.createdAt,
       },
     });

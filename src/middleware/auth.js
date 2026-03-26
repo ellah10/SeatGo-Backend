@@ -1,11 +1,6 @@
 import { verifyToken } from "../utils/jwt.js";
 import { User } from "../models/User.js";
 
-/**
- * Middleware JWT:
- * - Attend: Authorization: Bearer <token>
- * - Ajoute: req.user
- */
 export async function requireAuth(req, res, next) {
   try {
     const header = req.headers.authorization || "";
@@ -16,9 +11,16 @@ export async function requireAuth(req, res, next) {
     }
 
     const decoded = verifyToken(token);
-    const user = await User.findById(decoded.sub).select("-passwordHash");
 
-    if (!user) return res.status(401).json({ message: "Utilisateur invalide" });
+    const user = await User.findById(decoded.sub)
+      .select(
+        "_id email firstName lastName phone studentCardNumber isVerified avatarUrl role createdAt updatedAt"
+      )
+      .lean();
+
+    if (!user) {
+      return res.status(401).json({ message: "Utilisateur invalide" });
+    }
 
     req.user = user;
     next();

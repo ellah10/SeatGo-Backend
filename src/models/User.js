@@ -9,9 +9,6 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
 
-    // ✅ Ajouts SeatGo (auth solide)
-    // - Carte étudiant obligatoire
-    // - Compte bloqué tant que l'OTP n'est pas validé
     studentCardNumber: { type: String, required: true, unique: true, trim: true },
     isVerified: { type: Boolean, default: false },
     avatarUrl: { type: String, default: "" },
